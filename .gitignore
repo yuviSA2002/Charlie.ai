@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.wav
+temp_speech.txt
+charlie_workspace/
+.env
