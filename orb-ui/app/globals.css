@@ -1,0 +1,470 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: #000;
+  overflow: hidden;
+  font-family: "Courier New", monospace;
+}
+
+.orb-root {
+  position: fixed;
+  inset: 0;
+  cursor: grab;
+}
+
+.orb-root:active {
+  cursor: grabbing;
+}
+
+.orb-root canvas {
+  display: block;
+}
+
+/* Film grain overlay */
+.overlay-grain {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 150px;
+  mix-blend-mode: screen;
+}
+
+/* Scanline overlay */
+.overlay-scanlines {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.15) 2px,
+    rgba(0, 0, 0, 0.15) 4px
+  );
+  opacity: 0.3;
+}
+
+/* Vignette */
+.overlay-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 40%,
+    rgba(0, 0, 0, 0.7) 100%
+  );
+}
+
+/* ——— HUD ——— */
+.hud {
+  position: fixed;
+  z-index: 20;
+  color: #ffaa30;
+  font-family: "Courier New", monospace;
+  user-select: none;
+}
+
+.hud-controls {
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.hud-btn {
+  min-width: 44px;
+  height: 44px;
+  padding: 0 12px;
+  background: rgba(20, 10, 0, 0.55);
+  border: 1px solid rgba(255, 170, 48, 0.45);
+  border-radius: 4px;
+  color: #ffaa30;
+  font-family: "Courier New", monospace;
+  font-size: 15px;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  text-shadow: 0 0 6px rgba(255, 170, 48, 0.7);
+  box-shadow: 0 0 12px rgba(255, 140, 20, 0.12) inset;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.hud-btn:hover {
+  background: rgba(60, 30, 0, 0.7);
+  border-color: rgba(255, 200, 100, 0.9);
+  box-shadow:
+    0 0 14px rgba(255, 150, 30, 0.35),
+    0 0 12px rgba(255, 140, 20, 0.2) inset;
+}
+
+.hud-btn:active {
+  background: rgba(90, 45, 0, 0.8);
+}
+
+.hud-btn[aria-pressed="true"] {
+  background: rgba(120, 60, 0, 0.6);
+  border-color: #ffcc66;
+  color: #ffcc66;
+}
+
+.hud-row {
+  display: flex;
+  gap: 8px;
+}
+
+.hud-hint {
+  bottom: 24px;
+  left: 24px;
+  font-size: 11px;
+  line-height: 1.7;
+  letter-spacing: 0.1em;
+  opacity: 0.55;
+  text-shadow: 0 0 8px rgba(255, 170, 48, 0.6);
+  pointer-events: none;
+}
+
+.hud-hint .key {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 170, 48, 0.5);
+  border-radius: 3px;
+  margin-right: 4px;
+  font-size: 10px;
+}
+
+.hud-title {
+  top: 24px;
+  left: 24px;
+  font-size: 13px;
+  letter-spacing: 0.35em;
+  opacity: 0.7;
+  text-shadow: 0 0 10px rgba(255, 170, 48, 0.8);
+  pointer-events: none;
+}
+
+.hud-title::after {
+  content: "";
+  display: block;
+  margin-top: 6px;
+  width: 120px;
+  height: 1px;
+  background: linear-gradient(to right, rgba(255, 170, 48, 0.8), transparent);
+}
+
+.hud-error {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: #ff5533;
+  text-shadow: 0 0 8px rgba(255, 60, 30, 0.7);
+}
+
+/* ——— Camera preview panel ——— */
+.camera-panel {
+  position: relative;
+  width: 208px;
+  height: 156px;
+  display: none;
+  border: 1px solid rgba(255, 170, 48, 0.45);
+  border-radius: 4px;
+  overflow: hidden;
+  background: #0a0500;
+  box-shadow: 0 0 16px rgba(255, 140, 20, 0.15);
+}
+
+.camera-panel.visible {
+  display: block;
+}
+
+.camera-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* mirror so it behaves like a mirror */
+  filter: sepia(1) hue-rotate(-15deg) saturate(2.2) brightness(0.75)
+    contrast(1.15);
+  opacity: 0.85;
+}
+
+.camera-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.camera-status {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 3px 6px;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: #ffcc66;
+  background: rgba(10, 5, 0, 0.65);
+  text-shadow: 0 0 6px rgba(255, 170, 48, 0.8);
+}
+
+@media (max-width: 600px) {
+  .hud-hint {
+    display: none;
+  }
+}
+
+/* ——— HOLOGRAPHIC 3D DASHBOARD CUBE ——— */
+.dashboard-cube {
+  position: relative;
+  width: 800px;
+  height: 800px;
+  transform-style: preserve-3d;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.0s ease-in-out;
+}
+
+.dashboard-cube.visible {
+  opacity: 1;
+}
+
+.cube-face {
+  position: absolute;
+  width: 800px;
+  height: 800px;
+  display: flex;
+  flex-direction: column;
+  padding: 40px;
+  pointer-events: auto;
+  
+  /* Heavy blur + opaque background to block overlapping screens */
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background: rgba(0, 20, 40, 0.7);
+  
+  border: 1px solid rgba(0, 170, 255, 0.5);
+  box-shadow: 0 0 50px rgba(0, 170, 255, 0.1), inset 0 0 30px rgba(0, 170, 255, 0.2);
+  border-radius: 20px;
+  color: #66ccff;
+  font-size: 24px;
+  line-height: 1.6;
+  overflow-y: auto;
+  transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.5s ease;
+}
+
+/* 3D Cube Positioning */
+.cube-face.front  { transform: translateZ(400px); }
+.cube-face.back   { transform: rotateY(180deg) translateZ(400px); }
+.cube-face.right  { transform: rotateY(90deg) translateZ(400px); }
+.cube-face.left   { transform: rotateY(-90deg) translateZ(400px); }
+.cube-face.top    { transform: rotateX(90deg) translateZ(400px); }
+.cube-face.bottom { transform: rotateX(-90deg) translateZ(400px); }
+
+/* Exploded Grid View (3x2 Layout) */
+.dashboard-cube.exploded {
+  z-index: 999;
+}
+
+.dashboard-cube.exploded .cube-face {
+  box-shadow: 0 0 80px rgba(0, 170, 255, 0.2), inset 0 0 20px rgba(0, 170, 255, 0.3);
+}
+
+.dashboard-cube.exploded .cube-face.left   { transform: translate3d(calc(0px - var(--explode-x, 500px)), calc(0px - var(--explode-y, 280px)), 0px) scale(var(--explode-scale, 0.6)); }
+.dashboard-cube.exploded .cube-face.front  { transform: translate3d(0px, calc(0px - var(--explode-y, 280px)), 0px) scale(var(--explode-scale, 0.6)); }
+.dashboard-cube.exploded .cube-face.right  { transform: translate3d(var(--explode-x, 500px), calc(0px - var(--explode-y, 280px)), 0px) scale(var(--explode-scale, 0.6)); }
+
+.dashboard-cube.exploded .cube-face.top    { transform: translate3d(calc(0px - var(--explode-x, 500px)), var(--explode-y, 280px), 0px) scale(var(--explode-scale, 0.6)); }
+.dashboard-cube.exploded .cube-face.bottom { transform: translate3d(0px, var(--explode-y, 280px), 0px) scale(var(--explode-scale, 0.6)); }
+.dashboard-cube.exploded .cube-face.back   { transform: translate3d(var(--explode-x, 500px), var(--explode-y, 280px), 0px) scale(var(--explode-scale, 0.6)); }
+
+/* Panel Header inside faces */
+.panel-header {
+  font-size: 32px;
+  font-weight: bold;
+  letter-spacing: 3px;
+  margin-bottom: 20px;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(48, 170, 255, 0.3);
+  padding-bottom: 10px;
+}
+
+.panel-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+  overflow-y: auto;
+}
+
+/* Media/YouTube styles */
+.media-container {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(48, 170, 255, 0.4);
+}
+
+.media-container iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* Tasks & Streaks */
+.task-item {
+  background: rgba(0, 40, 80, 0.5);
+  padding: 15px;
+  border-radius: 8px;
+  border-left: 6px solid #0af;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 24px;
+}
+
+.flame-streak {
+  font-size: 36px;
+  filter: drop-shadow(0 0 10px #0af) hue-rotate(180deg) saturate(200%); /* cyan flame */
+}
+
+/* Custom Scrollbar for Cube Faces */
+.cube-face::-webkit-scrollbar, .panel-content::-webkit-scrollbar {
+  width: 12px;
+}
+.cube-face::-webkit-scrollbar-track, .panel-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+.cube-face::-webkit-scrollbar-thumb, .panel-content::-webkit-scrollbar-thumb {
+  background: rgba(48, 170, 255, 0.5);
+  border-radius: 3px;
+}
+
+/* HUD Menu Drawer */
+.hud-menu-btn {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  z-index: 20;
+  width: 50px;
+  height: 50px;
+  background: rgba(0, 20, 40, 0.7);
+  border: 1px solid rgba(0, 170, 255, 0.5);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  color: #0af;
+  transition: all 0.3s ease;
+}
+.hud-menu-btn:hover {
+  background: rgba(0, 170, 255, 0.2);
+  box-shadow: 0 0 15px rgba(0, 170, 255, 0.5);
+}
+
+.hud-drawer {
+  position: absolute;
+  bottom: 80px;
+  left: 20px;
+  z-index: 20;
+  width: 320px;
+  background: rgba(0, 15, 25, 0.85);
+  border: 1px solid rgba(0, 170, 255, 0.3);
+  backdrop-filter: blur(16px);
+  border-radius: 12px;
+  padding: 20px;
+  color: #a0d0ff;
+  font-family: 'Space Mono', monospace;
+  font-size: 14px;
+  transform: translateX(-150%);
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+}
+.hud-drawer.open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.news-item, .job-item {
+  margin-bottom: 16px;
+}
+
+.news-title, .job-title {
+  display: block;
+  font-size: 14px;
+  font-weight: bold;
+  color: #aaddff;
+  text-decoration: none;
+  margin-bottom: 4px;
+}
+
+.news-summary, .job-details {
+  font-size: 12px;
+  opacity: 0.8;
+  line-height: 1.4;
+}
+
+.weather-data {
+  font-size: 12px;
+  white-space: pre-wrap;
+  font-family: monospace;
+}
+
+.media-iframe {
+  width: 100%;
+  flex: 1;
+  border: none;
+  border-radius: 4px;
+  opacity: 0.9;
+  filter: sepia(1) hue-rotate(180deg) saturate(1.5) brightness(0.9); /* Makes video look holographic blue */
+}
+
+.media-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  opacity: 0.5;
+  border: 1px dashed rgba(48, 170, 255, 0.3);
+}
+
+.loading {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  opacity: 0.5;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.3; }
+  50% { opacity: 0.8; }
+  100% { opacity: 0.3; }
+}

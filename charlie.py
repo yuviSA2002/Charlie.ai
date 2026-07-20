@@ -57,8 +57,8 @@ except Exception as e:
     whisper_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
 
 recognizer = sr.Recognizer()
-# 1.2s pause threshold: enough to breathe, but fast enough to not feel laggy
-recognizer.pause_threshold = 1.2  
+# 0.5s pause threshold: extremely fast response time (VAD improvement)
+recognizer.pause_threshold = 0.5  
 
 SYSTEM_PROMPT = """
 You are Charlie, a highly advanced, cool, and witty AI voice assistant.
@@ -67,9 +67,10 @@ You MUST address the user exclusively as "Boss" (बॉस). NEVER use "श्�
 
 CRITICAL RULES:
 1. Speak in a casual mix of Hindi and English (Hinglish).
-2. However, you MUST write your entire response using the Devanagari script so the TTS engine can pronounce it. 
+2. However, you MUST write your entire verbal response using the Devanagari script so the TTS engine can pronounce it. 
    Example: "डोंट वरी बॉस, मैंने सिस्टम चेक कर लिया है। सब परफेक्ट है।"
 3. Keep your answers extremely concise (1-2 sentences). 
+4. If the user asks you to add a task, include this exactly in your response: ADD_TASK: <task description in english>
 """
 
 STOP_GENERATION = False
@@ -149,17 +150,32 @@ def process_with_llm(text):
                 chunk = data.get("response", "")
                 current_sentence += chunk
                 
-                # Yield at sentence boundaries
-                if any(punct in chunk for punct in [".", "?", "!", "\n", "|", "।"]):
+                # Yield at sentence and phrase boundaries for faster streaming
+                if any(punct in chunk for punct in [".", "?", "!", "\n", "|", "।", ",", "،"]):
                     clean_sent = current_sentence.strip()
                     if clean_sent:
-                        tts_queue.put(clean_sent)
-                        socketio.emit('transcript', {'text': clean_sent})
+                        # Intercept ADD_TASK command
+                        if "ADD_TASK:" in clean_sent:
+                            parts = clean_sent.split("ADD_TASK:")
+                            task_desc = parts[1].split("\n")[0].strip()
+                            socketio.emit('add_task', {'task': task_desc})
+                            clean_sent = parts[0].strip() # Remove command from TTS
+                        
+                        if clean_sent:
+                            tts_queue.put(clean_sent)
+                            socketio.emit('transcript', {'text': clean_sent})
                     current_sentence = ""
                     
         if current_sentence.strip() and not STOP_GENERATION:
-            tts_queue.put(current_sentence.strip())
-            socketio.emit('transcript', {'text': current_sentence.strip()})
+            clean_sent = current_sentence.strip()
+            if "ADD_TASK:" in clean_sent:
+                parts = clean_sent.split("ADD_TASK:")
+                task_desc = parts[1].split("\n")[0].strip()
+                socketio.emit('add_task', {'task': task_desc})
+                clean_sent = parts[0].strip()
+            if clean_sent:
+                tts_queue.put(clean_sent)
+                socketio.emit('transcript', {'text': clean_sent})
             
     except Exception as e:
         print(f"LLM Error: {e}")
@@ -170,70 +186,85 @@ def process_with_llm(text):
 def audio_loop():
     global STOP_GENERATION, IS_THINKING
     print("CHARLIE V2 AUDIO LOOP ONLINE")
-    with sr.Microphone(sample_rate=16000) as source:
-        print("Adjusting for ambient noise... Please stay quiet for 2 seconds.")
-        recognizer.adjust_for_ambient_noise(source, duration=2)
-        print("Ready. Listening for 'Hey Charlie'...")
-        emit_state('idle', "Waiting for 'Hey Charlie'...")
-        
-        IN_CONVERSATION = False
-        
-        while True:
-            try:
-                # If Charlie is busy thinking/speaking OR we are idle -> Listen ONLY for wake word / interrupt
-                if IS_PLAYING_AUDIO() or IS_THINKING or not IN_CONVERSATION:
-                    audio_data = recognizer.listen(source, timeout=1, phrase_time_limit=3)
-                    wav_bytes = audio_data.get_wav_data()
-                    
-                    segments, _ = whisper_model.transcribe(io.BytesIO(wav_bytes), language="en")
-                    text = " ".join([s.text for s in segments]).lower()
-                    clean_text = "".join(c for c in text if c.isalnum() or c.isspace())
-                    
-                    if "charlie" in clean_text:
-                        STOP_GENERATION = True
-                        winsound.PlaySound(None, winsound.SND_PURGE)
-                        while not tts_queue.empty():
-                            try: tts_queue.get_nowait(); tts_queue.task_done()
-                            except queue.Empty: break
-                            
-                        play_acknowledgment()
-                        IN_CONVERSATION = True
+    
+    while True:
+        try:
+            with sr.Microphone(sample_rate=16000) as source:
+                print("Adjusting for ambient noise... Please stay quiet for 2 seconds.")
+                recognizer.adjust_for_ambient_noise(source, duration=2)
+                print("Ready. Listening for 'Hey Charlie'...")
+                emit_state('idle', "Waiting for 'Hey Charlie'...")
                 
-                # If Charlie finished his turn and we are IN_CONVERSATION -> Listen directly for user command!
-                else:
-                    emit_state('listening', "I'm listening, Boss...")
+                IN_CONVERSATION = False
+                
+                while True:
                     try:
-                        # Listen for 8 seconds. If silence, timeout and end conversation.
-                        command_audio = recognizer.listen(source, timeout=8, phrase_time_limit=15)
-                        emit_state('thinking', "Transcribing...")
-                        cmd_wav = command_audio.get_wav_data()
-                        
-                        # Removed language="hi" to allow Whisper to transcribe Hinglish/English perfectly
-                        cmd_segments, _ = whisper_model.transcribe(io.BytesIO(cmd_wav))
-                        cmd_text = " ".join([s.text for s in cmd_segments])
-                        socketio.emit('transcript', {'text': f"You: {cmd_text}"})
-                        
-                        if cmd_text.strip():
-                            threading.Thread(target=process_with_llm, args=(cmd_text,), daemon=True).start()
-                        else:
-                            # Ignored noise, stay in conversation loop
-                            pass
+                        # If Charlie is busy thinking/speaking OR we are idle -> Listen ONLY for wake word / interrupt
+                        if IS_PLAYING_AUDIO() or IS_THINKING or not IN_CONVERSATION:
+                            audio_data = recognizer.listen(source, timeout=1, phrase_time_limit=3)
+                            wav_bytes = audio_data.get_wav_data()
                             
-                    except sr.WaitTimeoutError:
-                        # 8 seconds of silence, conversation ended naturally
-                        IN_CONVERSATION = False
-                        emit_state('idle', "Waiting for 'Hey Charlie'...")
-                        winsound.PlaySound("sleep.wav", winsound.SND_FILENAME)
+                            segments, _ = whisper_model.transcribe(io.BytesIO(wav_bytes), language="en")
+                            text = " ".join([s.text for s in segments]).lower()
+                            clean_text = "".join(c for c in text if c.isalnum() or c.isspace())
+                            
+                            if "charlie" in clean_text:
+                                STOP_GENERATION = True
+                                winsound.PlaySound(None, winsound.SND_PURGE)
+                                while not tts_queue.empty():
+                                    try: tts_queue.get_nowait(); tts_queue.task_done()
+                                    except queue.Empty: break
+                                    
+                                play_acknowledgment()
+                                IN_CONVERSATION = True
                         
-            except sr.WaitTimeoutError:
-                # Timeout while listening for wake word (happens every 1 sec to check flags)
-                if not IN_CONVERSATION and not IS_THINKING and not IS_PLAYING_AUDIO():
-                    emit_state('idle', "Waiting for 'Hey Charlie'...")
-            except KeyboardInterrupt:
-                break
-            except Exception as e:
-                print(f"Error in audio loop: {e}")
-                time.sleep(1)
+                        # If Charlie finished his turn and we are IN_CONVERSATION -> Listen directly for user command!
+                        else:
+                            emit_state('listening', "I'm listening, Boss...")
+                            try:
+                                # Listen for 8 seconds. If silence, timeout and end conversation.
+                                command_audio = recognizer.listen(source, timeout=8, phrase_time_limit=15)
+                                emit_state('thinking', "Transcribing...")
+                                cmd_wav = command_audio.get_wav_data()
+                                
+                                # Removed language="hi" to allow Whisper to transcribe Hinglish/English perfectly
+                                cmd_segments, _ = whisper_model.transcribe(io.BytesIO(cmd_wav))
+                                cmd_text = " ".join([s.text for s in cmd_segments])
+                                socketio.emit('transcript', {'text': f"You: {cmd_text}"})
+                                
+                                if cmd_text.strip():
+                                    lower_cmd = cmd_text.lower()
+                                    if "play" in lower_cmd and ("music" in lower_cmd or "youtube" in lower_cmd or "song" in lower_cmd):
+                                        # Default chill synthwave / lofi for the holographic theme
+                                        socketio.emit('play_media', {'url': '4xDzrUhVKVA'}) 
+                                        tts_queue.put("Playing your stream now, बॉस.")
+                                        socketio.emit('transcript', {'text': "Charlie: Playing your stream now, Boss."})
+                                        IN_CONVERSATION = False
+                                    else:
+                                        threading.Thread(target=process_with_llm, args=(cmd_text,), daemon=True).start()
+                                else:
+                                    # Ignored noise, stay in conversation loop
+                                    pass
+                                    
+                            except sr.WaitTimeoutError:
+                                # 8 seconds of silence, conversation ended naturally
+                                IN_CONVERSATION = False
+                                emit_state('idle', "Waiting for 'Hey Charlie'...")
+                                winsound.PlaySound("sleep.wav", winsound.SND_FILENAME)
+                                
+                    except sr.WaitTimeoutError:
+                        # Timeout while listening for wake word (happens every 1 sec to check flags)
+                        if not IN_CONVERSATION and not IS_THINKING and not IS_PLAYING_AUDIO():
+                            emit_state('idle', "Waiting for 'Hey Charlie'...")
+                    except KeyboardInterrupt:
+                        return
+                    except Exception as e:
+                        print(f"Error in inner audio loop: {e}. Restarting microphone...")
+                        time.sleep(1)
+                        break  # Break out of inner loop to recreate Microphone
+        except Exception as e:
+            print(f"Fatal audio initialization error: {e}. Retrying in 5s...")
+            time.sleep(5)
 
 def IS_PLAYING_AUDIO():
     return IS_PLAYING or not tts_queue.empty()
