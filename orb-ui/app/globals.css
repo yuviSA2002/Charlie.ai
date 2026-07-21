@@ -298,6 +298,27 @@ body {
 .dashboard-cube.exploded .cube-face.bottom { transform: translate3d(0px, var(--explode-y, 280px), 0px) scale(var(--explode-scale, 0.6)); }
 .dashboard-cube.exploded .cube-face.back   { transform: translate3d(var(--explode-x, 500px), var(--explode-y, 280px), 0px) scale(var(--explode-scale, 0.6)); }
 
+/* Enlarged 2D Mode */
+.dashboard-cube.enlarged {
+  z-index: 999;
+}
+
+/* Hide other faces when one is enlarged */
+.dashboard-cube.enlarged .cube-face:not(.enlarged-active) {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* When Right Face is enlarged, bring it to the center and remove ALL 3D rotations */
+.dashboard-cube.enlarged .cube-face.right.enlarged-active {
+  /* No rotateY! Just scale and position in the XY plane to avoid clickjacking */
+  transform: translate3d(0, 0, 100px) scale(1.6);
+  z-index: 1000;
+  box-shadow: 0 0 150px rgba(0, 170, 255, 0.5), inset 0 0 50px rgba(0, 170, 255, 0.5);
+  background: rgba(0, 15, 30, 0.95);
+  pointer-events: auto;
+}
+
 /* Panel Header inside faces */
 .panel-header {
   font-size: 32px;
@@ -381,8 +402,77 @@ body {
   transition: all 0.3s ease;
 }
 .hud-menu-btn:hover {
-  background: rgba(0, 170, 255, 0.2);
-  box-shadow: 0 0 15px rgba(0, 170, 255, 0.5);
+  background: rgba(0, 170, 255, 0.4);
+}
+
+/* 2D Media HUD Overlay */
+.media-hud-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80vw;
+  max-width: 1200px;
+  aspect-ratio: 16/9;
+  z-index: 2000;
+  
+  background: rgba(0, 20, 40, 0.85);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border: 1px solid rgba(0, 170, 255, 0.6);
+  box-shadow: 0 0 100px rgba(0, 170, 255, 0.2), inset 0 0 50px rgba(0, 170, 255, 0.3);
+  border-radius: 20px;
+  
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: hud-pop 0.5s cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+@keyframes hud-pop {
+  0% { opacity: 0; transform: translate(-50%, -40%) scale(0.9); filter: brightness(2); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: brightness(1); }
+}
+
+.media-hud-header {
+  height: 50px;
+  background: rgba(0, 100, 200, 0.3);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid rgba(0, 170, 255, 0.5);
+  color: #0af;
+  font-weight: bold;
+  letter-spacing: 2px;
+}
+
+.media-hud-close {
+  background: rgba(255, 50, 50, 0.2);
+  border: 1px solid rgba(255, 50, 50, 0.5);
+  color: #ff5555;
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.media-hud-close:hover {
+  background: rgba(255, 50, 50, 0.8);
+  color: #fff;
+  box-shadow: 0 0 15px rgba(255, 50, 50, 0.5);
+}
+
+.media-hud-iframe {
+  flex-grow: 1;
+  width: 100%;
+  border: none;
+  background: #000;
 }
 
 .hud-drawer {
@@ -467,4 +557,72 @@ body {
   0% { opacity: 0.3; }
   50% { opacity: 0.8; }
   100% { opacity: 0.3; }
+}
+
+/* Digital Weather Widget Animations */
+.digital-icon {
+  width: 80px;
+  height: 80px;
+  filter: drop-shadow(0 0 8px rgba(0, 170, 255, 0.4));
+}
+.digital-icon.sun {
+  filter: drop-shadow(0 0 10px rgba(255, 170, 48, 0.6));
+}
+
+.spin-slow {
+  transform-origin: 50px 50px;
+  animation: spin 8s linear infinite;
+}
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+
+.pulse-rays {
+  transform-origin: 50px 50px;
+  animation: pulse-rays-anim 3s ease-in-out infinite;
+}
+@keyframes pulse-rays-anim {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+.float {
+  animation: float-anim 4s ease-in-out infinite;
+}
+.float-fast {
+  animation: float-anim 2s ease-in-out infinite;
+}
+@keyframes float-anim {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+  100% { transform: translateY(0px); }
+}
+
+.rain-fall {
+  animation: rain-anim 1.2s linear infinite;
+}
+@keyframes rain-anim {
+  0% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -24; }
+}
+
+.snow-fall {
+  animation: float-anim 3s ease-in-out infinite, pulse 3s infinite;
+}
+
+.fog-drift {
+  animation: fog-anim 8s linear infinite;
+}
+@keyframes fog-anim {
+  0% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -40; }
+}
+
+.flash {
+  animation: flash-anim 3s infinite;
+}
+@keyframes flash-anim {
+  0%, 90%, 94%, 98% { opacity: 0; }
+  92%, 96%, 100% { opacity: 1; filter: drop-shadow(0 0 15px #ffea00); }
 }

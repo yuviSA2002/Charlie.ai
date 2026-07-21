@@ -31,12 +31,15 @@ export default function CharlieOrb() {
   const [error, setError] = useState<string | null>(null);
 
   // Charlie state
-  const [charlieState, setCharlieState] = useState("idle");
-  const [charlieTranscript, setCharlieTranscript] = useState("");
-  
+  const [charlieState, setCharlieState] = useState<string>("idle");
+  const [charlieTranscript, setCharlieTranscript] = useState<string>("");
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const socketRef = useRef<Socket | null>(null);
+
   // Dashboard state
   const [dashboardVisible, setDashboardVisible] = useState(false);
   const [dashboardExploded, setDashboardExploded] = useState(false);
+  const [iframeUrl, setIframeUrl] = useState<string | null>(null);
   
   const dashboardExplodedRef = useRef(false);
   useEffect(() => {
@@ -76,6 +79,8 @@ export default function CharlieOrb() {
     }
   }, [dashboardExploded]);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<{ query: string, results: any[] } | null>(null);
+  const [youtubeResults, setYoutubeResults] = useState<{ query: string, results: any[] } | null>(null);
   const [tasks, setTasks] = useState<{ id: string, text: string }[]>([
     { id: '1', text: 'Initialize System Subroutines' }
   ]);
@@ -110,6 +115,7 @@ export default function CharlieOrb() {
 
   useEffect(() => {
     const socket: Socket = io("http://localhost:5000");
+    socketRef.current = socket;
 
     socket.on("state_change", (data: { state: string; message: string }) => {
       setCharlieState(data.state);
@@ -121,7 +127,47 @@ export default function CharlieOrb() {
 
     socket.on("play_media", (data: { url: string }) => {
       setDashboardVisible(true);
-      setMediaUrl(`https://www.youtube.com/embed/${data.url}?autoplay=1`);
+      setDashboardExploded(false);
+      setMediaUrl(`https://www.youtube.com/embed/${data.url}?autoplay=1&controls=1&enablejsapi=1`);
+      setIframeUrl(null);
+      setSearchResults(null);
+      setYoutubeResults(null);
+      if (sceneRef.current) {
+        sceneRef.current.lookAtRightFace();
+      }
+    });
+
+    socket.on("render_url", (data: { url: string }) => {
+      setDashboardVisible(true);
+      setDashboardExploded(false);
+      if (sceneRef.current) {
+        sceneRef.current.lookAtBackFace();
+      }
+      setIframeUrl(data.url);
+      setSearchResults(null);
+      setYoutubeResults(null);
+    });
+
+    socket.on("render_search", (data: { query: string, results: any[] }) => {
+      setDashboardVisible(true);
+      setDashboardExploded(false);
+      if (sceneRef.current) {
+        sceneRef.current.lookAtBackFace();
+      }
+      setSearchResults(data);
+      setIframeUrl(null);
+      setYoutubeResults(null);
+    });
+
+    socket.on("render_youtube", (data: { query: string, results: any[] }) => {
+      setDashboardVisible(true);
+      setDashboardExploded(false);
+      if (sceneRef.current) {
+        sceneRef.current.lookAtBackFace();
+      }
+      setYoutubeResults(data);
+      setIframeUrl(null);
+      setSearchResults(null);
     });
 
     socket.on("add_task", (data: { task: string }) => {
@@ -208,7 +254,7 @@ export default function CharlieOrb() {
           if (isDraggingRef.current) {
             isDraggingRef.current = false;
             dragTargetRef.current = null;
-            // Hold the red cursor for 250ms so the user can see the "click" flash
+            // Hold the red cursor for 250ms so the user can see the \"click\" flash
             // even if they released the second pinch immediately.
             setTimeout(() => {
               setCursorRed(false);
@@ -272,15 +318,22 @@ export default function CharlieOrb() {
     try {
       await tracker.start();
       setCamera("on");
-    } catch (err) {
+    } catch (err: any) {
       trackerRef.current = null;
       tracker.stop();
       setCamera("error");
-      setError(
-        err instanceof DOMException && err.name === "NotAllowedError"
-          ? "CAMERA ACCESS DENIED"
-          : "TRACKING INIT FAILED",
-      );
+      const errReason = err?.message || err?.name || String(err);
+      
+      let finalErrorMsg = `TRACKING INIT FAILED: ${errReason}`;
+      if (err instanceof DOMException && err.name === "NotAllowedError") {
+        finalErrorMsg = "CAMERA ACCESS DENIED (Check Browser Permissions)";
+      } else if (errReason.includes("Could not start video source") || err?.name === "NotReadableError" || err?.name === "TrackStartError") {
+        finalErrorMsg = "CAMERA IN USE BY ANOTHER APP (Close Zoom/Teams)";
+      } else if (err?.name === "NotFoundError") {
+        finalErrorMsg = "NO WEBCAM DETECTED";
+      }
+
+      setError(finalErrorMsg);
     }
   }, []);
 
@@ -297,11 +350,68 @@ export default function CharlieOrb() {
         toggleGestures();
       } else if (e.key.toLowerCase() === "t") {
         setTasks(prev => [...prev, { id: Math.random().toString(), text: 'User Manual Task ' + (prev.length + 1) }]);
+      } else if (e.key.toLowerCase() === "m") {
+        setIsMuted(prev => {
+          const next = !prev;
+          socketRef.current?.emit('toggle_mute', { muted: next });
+          return next;
+        });
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [toggleGestures]);
+
+  const handlePlayVideo = (videoId: string) => {
+    setDashboardVisible(true);
+    setDashboardExploded(false);
+    setMediaUrl(`https://www.youtube.com/embed/${videoId}?autoplay=1&controls=1&enablejsapi=1`);
+    setIframeUrl(null);
+    setSearchResults(null);
+    setYoutubeResults(null);
+    if (sceneRef.current) {
+      sceneRef.current.lookAtRightFace();
+    }
+  };
+
+  const handleOpenLink = (url: string) => {
+    setIframeUrl(url);
+    setYoutubeResults(null);
+    setSearchResults(null);
+    setDashboardExploded(false);
+    if (sceneRef.current) {
+      sceneRef.current.lookAtBackFace();
+    }
+  };
+
+  const [enlargedFace, setEnlargedFace] = useState<string | null>(null);
+
+  const playVideo = () => {
+    const iframe = document.getElementById('yt-player') as HTMLIFrameElement;
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo' }), '*');
+    }
+  };
+
+  const pauseVideo = () => {
+    const iframe = document.getElementById('yt-player') as HTMLIFrameElement;
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*');
+    }
+  };
+
+  const toggleEnlarge = () => {
+    const isNowEnlarged = enlargedFace !== 'right';
+    setEnlargedFace(isNowEnlarged ? 'right' : null);
+    
+    if (sceneRef.current) {
+      if (isNowEnlarged) {
+        sceneRef.current.lookAtFrontFace();
+      } else {
+        sceneRef.current.lookAtRightFace();
+      }
+    }
+  };
 
   const cameraOn = camera === "on";
 
@@ -315,7 +425,19 @@ export default function CharlieOrb() {
       
       {/* Wrapper to protect React sibling indexing from CSS3DObject moving the dashboard node */}
       <div id="dashboard-wrapper">
-        <Dashboard ref={dashboardRef} visible={dashboardVisible} exploded={dashboardExploded} mediaUrl={mediaUrl} tasks={tasks} />
+        <Dashboard 
+          ref={dashboardRef} 
+          visible={dashboardVisible} 
+          exploded={dashboardExploded} 
+          enlargedFace={enlargedFace}
+          mediaUrl={mediaUrl} 
+          tasks={tasks}
+          iframeUrl={iframeUrl}
+          searchResults={searchResults}
+          youtubeResults={youtubeResults}
+          onPlayVideo={handlePlayVideo}
+          onOpenLink={handleOpenLink}
+        />
       </div>
 
       <div className="overlay-vignette" />
@@ -331,6 +453,7 @@ export default function CharlieOrb() {
         <p style={{ margin: '8px 0' }}><strong>'G'</strong> : Toggle Camera Tracker</p>
         <p style={{ margin: '8px 0' }}><strong>'D'</strong> : Toggle Dashboard Cube</p>
         <p style={{ margin: '8px 0' }}><strong>'T'</strong> : Add Test Task</p>
+        <p style={{ margin: '8px 0' }}><strong>'M'</strong> : Toggle Mute</p>
         <hr style={{ border: 'none', borderTop: '1px solid rgba(0, 170, 255, 0.3)', margin: '15px 0' }} />
         <h4 style={{ marginBottom: 10, color: '#0af' }}>GESTURES</h4>
         <p style={{ margin: '8px 0' }}>• <strong>Open Palm (Hold)</strong>: Toggle Dashboard</p>
@@ -343,6 +466,11 @@ export default function CharlieOrb() {
       {charlieState !== "idle" && (
         <div className="hud hud-state" style={{ position: 'absolute', top: '100px', left: '64px', fontSize: '1.5rem', color: '#ffaa30', fontWeight: 'bold' }}>
           {charlieState.toUpperCase()}
+        </div>
+      )}
+      {isMuted && (
+        <div className="hud hud-muted" style={{ position: 'absolute', top: '100px', right: '64px', fontSize: '1.5rem', color: '#ff3030', fontWeight: 'bold' }}>
+          VOICE MUTED
         </div>
       )}
       {charlieTranscript && (
@@ -382,14 +510,14 @@ export default function CharlieOrb() {
           </button>
         </div>
         <div className="hud-row">
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.zoomIn()} aria-label="Zoom in">
-            +
+          <button type="button" className="hud-btn" onClick={playVideo} aria-label="Play Video" style={{ fontSize: '18px' }}>
+            ▶
           </button>
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.zoomOut()} aria-label="Zoom out">
-            −
+          <button type="button" className="hud-btn" onClick={pauseVideo} aria-label="Pause Video" style={{ fontSize: '18px' }}>
+            ⏸
           </button>
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.resetView()}>
-            RESET
+          <button type="button" className="hud-btn" onClick={toggleEnlarge} aria-label="Enlarge Media" style={{ fontSize: '20px', marginLeft: '10px' }}>
+            🔲
           </button>
         </div>
       </div>

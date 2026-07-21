@@ -17,6 +17,9 @@ export interface OrbSceneApi {
   setExploded: (state: boolean) => void;
   resetCamera: () => void;
   getCameraRadius: () => number;
+  lookAtBackFace: () => void;
+  lookAtRightFace: () => void;
+  lookAtFrontFace: () => void;
   dispose: () => void;
 }
 
@@ -98,8 +101,8 @@ export function createOrbScene(container: HTMLElement, dashboardEl: HTMLDivEleme
   const chromaticPass = new ShaderPass(chromaticShader);
   composer.addPass(chromaticPass);
 
-  // Controls (attached to cssRenderer so it can capture events over the WebGL canvas if needed, though we set pointerEvents: none on it, so we'll re-enable pointerEvents auto on the actual dashboard)
-  const controls = new OrbitControls(camera, container); // Listen on the main container instead
+  // Controls (attached to WebGL renderer so it doesn't swallow clicks from the CSS3D UI overlay)
+  const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.04;
   controls.minDistance = MIN_DISTANCE;
@@ -126,7 +129,9 @@ export function createOrbScene(container: HTMLElement, dashboardEl: HTMLDivEleme
   let targetDeltaTheta = 0;
   let targetDeltaPhi = 0;
   let isResettingCamera = false;
-  let targetRotation = new THREE.Vector2();
+  let targetQuaternion = new THREE.Quaternion();
+  const autoRotateQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.005);
+  let isAutoRotatePaused = false;
 
   function getCameraRadius() {
     offsetScratch.copy(camera.position).sub(controls.target);
@@ -145,10 +150,7 @@ export function createOrbScene(container: HTMLElement, dashboardEl: HTMLDivEleme
     isExploded = state;
     if (state) {
       // Force the orb itself to face perfectly forward so the grid is flat
-      // Prevent wild rewinding by snapping to the nearest multiple of 2*PI
-      const nearestY = Math.round(orbGroup.rotation.y / (Math.PI * 2)) * (Math.PI * 2);
-      targetRotation.x = 0;
-      targetRotation.y = nearestY;
+      targetQuaternion.setFromEuler(new THREE.Euler(0, 0, 0, 'XYZ'));
     }
   }
 
@@ -715,6 +717,7 @@ export function createOrbScene(container: HTMLElement, dashboardEl: HTMLDivEleme
   function rotateBy(deltaTheta: number, deltaPhi: number, isNewGrab: boolean = false) {
     isZoomAnimating = false;
     isResettingCamera = false;
+    isAutoRotatePaused = false;
     
     // Instantly kill momentum if the user just grabbed the orb
     if (isNewGrab) {
@@ -751,6 +754,31 @@ export function createOrbScene(container: HTMLElement, dashboardEl: HTMLDivEleme
   function zoomToCore(isZoomingIn: boolean) {
     zoomTargetDistance = isZoomingIn ? 1.0 : 5.5;
     isZoomAnimating = true;
+  }
+
+  function lookAtBackFace() {
+    isExploded = false;
+    isAutoRotatePaused = true;
+    isResettingCamera = true;
+    
+    // Quaternion automatically calculates the absolute shortest path without tumbling!
+    targetQuaternion.setFromEuler(new THREE.Euler(0, Math.PI, 0, 'XYZ'));
+  }
+
+  function lookAtRightFace() {
+    isExploded = false;
+    isAutoRotatePaused = true;
+    isResettingCamera = true;
+    // Rotate -90deg around Y to bring the Right face (+X) to the Front (+Z)
+    targetQuaternion.setFromEuler(new THREE.Euler(0, -Math.PI / 2, 0, 'XYZ'));
+  }
+
+  function lookAtFrontFace() {
+    isExploded = false;
+    isAutoRotatePaused = true;
+    isResettingCamera = true;
+    // Face perfectly front
+    targetQuaternion.setFromEuler(new THREE.Euler(0, 0, 0, 'XYZ'));
   }
 
   // ═══════════════════════════════════════════════
@@ -926,13 +954,13 @@ export function createOrbScene(container: HTMLElement, dashboardEl: HTMLDivEleme
     }
 
     // Auto-rotation if no grabbing and not exploded
-    if (!isGrabbing && !isExploded) {
-      targetRotation.y += 0.005; // Base spin speed
+    if (!isGrabbing && !isExploded && !isAutoRotatePaused) {
+      // premultiply applies rotation in the GLOBAL frame (spinning like a globe)
+      targetQuaternion.premultiply(autoRotateQuat);
     }
 
-    // Smoothly interpolate orb rotation
-    orbGroup.rotation.x += (targetRotation.x - orbGroup.rotation.x) * 0.05;
-    orbGroup.rotation.y += (targetRotation.y - orbGroup.rotation.y) * 0.05;
+    // Smoothly interpolate orb rotation using spherical linear interpolation (slerp)
+    orbGroup.quaternion.slerp(targetQuaternion, 0.05);
 
     controls.update();
     composer.render();
@@ -991,6 +1019,9 @@ export function createOrbScene(container: HTMLElement, dashboardEl: HTMLDivEleme
     setExploded,
     resetCamera,
     getCameraRadius,
+    lookAtBackFace,
+    lookAtRightFace,
+    lookAtFrontFace,
     dispose,
   };
 }
