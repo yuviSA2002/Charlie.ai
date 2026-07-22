@@ -1,7 +1,5 @@
 # Charlie.ai 🤖
 
-![Charlie.ai Header](orb-ui/docs/screenshot.png)
-
 Charlie is an advanced, fully local, open-source AI assistant featuring a fully interactive 3D Orb UI, real-time voice transcription, and embedded media control. Built with privacy in mind, Charlie leverages local LLMs and local Speech-to-Text (STT)/Text-to-Speech (TTS) models to ensure your data never leaves your machine.
 
 ---
