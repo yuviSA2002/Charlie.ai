@@ -1,20 +1,20 @@
-# Charlie.ai 🤖
+# Charlie.ai
 
 Charlie is an advanced, fully local, open-source AI assistant featuring a fully interactive 3D Orb UI, real-time voice transcription, and embedded media control. Built with privacy in mind, Charlie leverages local LLMs and local Speech-to-Text (STT)/Text-to-Speech (TTS) models to ensure your data never leaves your machine.
 
 ---
 
-## 🌟 Key Features
+## Key Features
 
-*   **🗣️ Fully Local Voice AI:** Powered by local Whisper (STT), Ollama (LLM), and fast ONNX-based TTS models. No cloud API costs, no internet required for core intelligence.
-*   **🌐 3D Orb UI:** A stunning, interactive web-based interface built with Three.js and React. The Orb reacts to Charlie's state (Idle, Listening, Thinking, Speaking) with dynamic particle effects.
-*   **🎵 Integrated Media Player:** Ask Charlie to play a video or song, and he will intelligently search YouTube and stream the video directly onto an interactive 2D/3D display inside the UI, entirely bypassing browser clickjacking restrictions.
-*   **🧠 Contextual Memory:** Charlie can remember tasks and facts dynamically. *(Note: Memory is stored locally and explicitly excluded from version control for your privacy).*
-*   **🔇 Mute / Sleep Mode:** Hard-mute the microphone instantly using keybinds (`M`), putting the wake-word and conversation listeners to sleep.
+*   **Fully Local Voice AI:** Powered by local Whisper (STT), Ollama (LLM), and fast ONNX-based TTS models. No cloud API costs, no internet required for core intelligence.
+*   **3D Orb UI:** A stunning, interactive web-based interface built with Three.js and React. The Orb reacts to Charlie's state (Idle, Listening, Thinking, Speaking) with dynamic particle effects.
+*   **Integrated Media Player:** Ask Charlie to play a video or song, and he will intelligently search YouTube and stream the video directly onto an interactive 2D/3D display inside the UI, entirely bypassing browser clickjacking restrictions.
+*   **Contextual Memory:** Charlie can remember tasks and facts dynamically. *(Note: Memory is stored locally and explicitly excluded from version control for your privacy).*
+*   **Mute / Sleep Mode:** Hard-mute the microphone instantly using keybinds (`M`), putting the wake-word and conversation listeners to sleep.
 
 ---
 
-## 🛠️ Architecture Stack
+## Architecture Stack
 
 *   **Backend:** Python, Flask, Socket.IO
 *   **Frontend:** Next.js, React, Three.js, Tailwind CSS
@@ -25,7 +25,7 @@ Charlie is an advanced, fully local, open-source AI assistant featuring a fully 
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -64,7 +64,7 @@ Before you begin, ensure you have the following installed:
 
 ---
 
-## 💻 Running Charlie.ai
+## Running Charlie.ai
 
 You need to start both the Python backend server and the Next.js frontend server simultaneously.
 
@@ -85,7 +85,7 @@ Once both servers are running, open your browser and navigate to `http://localho
 
 ---
 
-## 🔒 Privacy & Security First
+## Privacy & Security First
 Charlie is designed to be a strictly local agent.
 - **No API Keys:** All weather and location utilities use open APIs requiring no authentication.
 - **No Cloud Tracking:** The AI runs via local Ollama models.
@@ -93,5 +93,5 @@ Charlie is designed to be a strictly local agent.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 Feel free to open issues, fork the repository, and submit pull requests. Let's make Charlie even smarter together!
