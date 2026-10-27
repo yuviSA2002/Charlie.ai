@@ -15,13 +15,104 @@ import numpy as np
 import datetime
 import warnings
 import sounddevice as sd
+import asyncio
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO
 from indic_transliteration import sanscript
-from openwakeword.model import Model
 from piper.voice import PiperVoice
+
+class CharlieMCPClient:
+    def __init__(self, workspace_path: str):
+        self.workspace_path = workspace_path
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self._run_loop, daemon=True)
+        self.thread.start()
+        
+        self.mcp_tools = []
+        self.session = None
+        self._connected = threading.Event()
+        
+        # Dispatch connection
+        asyncio.run_coroutine_threadsafe(self._connect(), self.loop)
+        self._connected.wait(timeout=15)
+
+    def _run_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+
+    async def _connect(self):
+        try:
+            from mcp.client.stdio import stdio_client, StdioServerParameters
+            from mcp.client.session import ClientSession
+            import contextlib
+            
+            # Using cmd.exe /c npx to handle Windows execution properly
+            server_params = StdioServerParameters(
+                command="cmd.exe",
+                args=["/c", "npx", "-y", "@modelcontextprotocol/server-filesystem", self.workspace_path]
+            )
+            
+            self._exit_stack = contextlib.AsyncExitStack()
+            
+            self.stdio_transport = await self._exit_stack.enter_async_context(stdio_client(server_params))
+            self.stdio_read, self.stdio_write = self.stdio_transport
+            
+            self.session = await self._exit_stack.enter_async_context(ClientSession(self.stdio_read, self.stdio_write))
+            await self.session.initialize()
+            
+            tools_response = await self.session.list_tools()
+            self.mcp_tools = tools_response.tools
+            self._connected.set()
+            print("[MCP] Successfully connected to File System MCP Server!")
+        except Exception as e:
+            print(f"[MCP] Failed to connect: {e}")
+            self._connected.set()
+
+    def get_tools_schema(self):
+        schema = []
+        allowed_tools = ["read_file", "write_file", "list_directory"]
+        for tool in self.mcp_tools:
+            if tool.name in allowed_tools:
+                schema.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.inputSchema
+                    }
+                })
+        return schema
+
+    def call_tool(self, name: str, arguments: dict):
+        if not self.session:
+            return "MCP Session not initialized."
+            
+        # Automatically resolve relative paths for filesystem tools
+        if name in ["read_file", "write_file"] and "path" in arguments:
+            path = arguments["path"]
+            if not os.path.isabs(path):
+                arguments["path"] = os.path.abspath(os.path.join(self.workspace_path, path))
+        elif name == "list_directory" and "path" in arguments:
+            path = arguments["path"]
+            if not os.path.isabs(path):
+                arguments["path"] = os.path.abspath(os.path.join(self.workspace_path, path))
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self.session.call_tool(name, arguments), 
+                self.loop
+            )
+            result = future.result(timeout=15)
+            texts = []
+            for content in result.content:
+                if content.type == "text":
+                    texts.append(content.text)
+            return "\n".join(texts)
+        except Exception as e:
+            return f"Error executing MCP tool: {e}"
+
+mcp_client = CharlieMCPClient(os.path.abspath("charlie_workspace"))
 
 # --- Inject CUDA Paths for faster-whisper on Windows ---
 for sp in site.getsitepackages():
@@ -55,7 +146,27 @@ WHISPER_MODEL = "small"
 OLLAMA_URL = "http://localhost:11434/api/chat"
 LLM_MODEL = "llama3.2" 
 TTS_MODEL = "pratham.onnx"
-WAKE_WORD_MODEL = "hey_jarvis.onnx" 
+
+def ensure_ollama_running():
+    import subprocess
+    import time
+    
+    print("Checking if Ollama is running...")
+    try:
+        requests.get("http://localhost:11434/", timeout=2)
+        print("Ollama is already running.")
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+        print("Ollama is not running. Starting Ollama in the background...")
+        try:
+            # On Windows, we can start it using subprocess without blocking
+            # Creation flags 0x08000000 = CREATE_NO_WINDOW
+            subprocess.Popen(["ollama", "serve"], creationflags=0x08000000)
+            time.sleep(3) # Give it a few seconds to initialize
+            print("Ollama started successfully.")
+        except Exception as e:
+            print(f"Warning: Tried to start Ollama but failed: {e}. Please ensure Ollama is installed.")
+
+ensure_ollama_running()
 
 print("Loading Models...")
 try:
@@ -66,9 +177,6 @@ except Exception as e:
 
 print("Loading Piper TTS...")
 piper_voice = PiperVoice.load(TTS_MODEL)
-
-print("Loading OpenWakeWord...")
-oww_model = Model(wakeword_models=[WAKE_WORD_MODEL], inference_framework="onnx")
 
 recognizer = sr.Recognizer()
 recognizer.pause_threshold = 0.8  
@@ -88,8 +196,9 @@ CRITICAL RULES:
    Sab kuch perfect hai. | सब कुछ परफेक्ट है।
 3. Keep your answers extremely concise (1-2 sentences maximum). 
 4. If asked to add a task, include [ADD_TASK: <task description>] in the Hinglish section.
-5. NEVER GUESS FACTS, TIME, OR LOCATION. If you don't know something with 100% certainty, you MUST use your provided tools to search the web or check the environment before answering.
-6. If the user explicitly asks you to SEARCH the web, SEARCH youtube, OPEN an app, OPEN a website, or PLAY a video, you MUST immediately call the corresponding tool. Do NOT answer verbally without calling the tool. To play a video, you MUST pass the EXACT 11-character YouTube video ID to the play_video tool.
+5. NEVER repeat or translate the user's command. You are an action-taking agent, not a translator. If the user asks you to do something, DO IT using your tools.
+6. NEVER GUESS FACTS, TIME, OR LOCATION. If you don't know something with 100% certainty, use your tools to search the web or check the environment.
+7. If the user explicitly asks you to SEARCH the web, SEARCH youtube, OPEN an app, OPEN a website, or PLAY a video, you MUST immediately call the corresponding tool. Do NOT just say you are doing it—actually call the tool! To play a video, you MUST pass the EXACT 11-character YouTube video ID to the play_video tool. If the user says "play the 4th video", look at your recent tool history to find the 4th video ID and use it.
 """
 
 # State Flags
@@ -221,7 +330,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "open_app",
-            "description": "Open a local desktop application on the user's Windows computer (e.g. 'notepad', 'calc', 'excel'). DO NOT use this for websites like YouTube, Google, or Netflix - use search_youtube or open_website instead.",
+            "description": "Open a local desktop application on the user's Windows computer (e.g. 'notepad', 'calc', 'excel').",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -235,7 +344,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "open_website",
-            "description": "Open a specific website directly on the AI's 3D dashboard interface.",
+            "description": "Open a specific website. If opening YouTube to play a song/video, you MUST provide the 'search_query' parameter.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -250,7 +359,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "search_youtube",
-            "description": "Search YouTube for videos, movies, trailers, or entertainment. ALWAYS use this when the user asks to search for a movie, trailer, or media.",
+            "description": "Search YouTube for videos, movies, music, or entertainment. Use this when the user asks to PLAY a song, movie, or search for a video.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -395,7 +504,7 @@ def open_website(url, search_query=""):
                 elif "?q=" in url:
                     query = url.split("?q=")[-1].split("&")[0]
                 else:
-                    query = "trending"
+                    return "Error: You called open_website for YouTube but didn't provide a search query. Please use the search_youtube tool directly with the exact song/video name the user asked for."
             query = urllib.parse.unquote_plus(query)
             return search_youtube(query)
         elif "google" in url.lower():
@@ -469,14 +578,23 @@ def process_with_llm(user_text):
     if len(chat_history) > 10:
         chat_history.pop(0)
         
+    loop_count = 0
     while True:
+        loop_count += 1
+        if loop_count > 5:
+            print("Infinite tool loop detected. Breaking out.")
+            tts_generation_queue.put(("माफ़ करना बॉस, मैं इस काम को पूरा नहीं कर पा रहा हूँ।", "Sorry boss, I'm having trouble completing this task."))
+            break
+            
         system_content = SYSTEM_PROMPT + load_memories()
+        
+        combined_tools = TOOLS_SCHEMA + mcp_client.get_tools_schema()
         
         payload = {
             "model": LLM_MODEL,
             "messages": [{"role": "system", "content": system_content}] + chat_history,
             "stream": True,
-            "tools": TOOLS_SCHEMA,
+            "tools": combined_tools,
             "keep_alive": -1
         }
         
@@ -513,7 +631,12 @@ def process_with_llm(user_text):
                                 elif func_name == "search_youtube": result = search_youtube(args.get("query", ""))
                                 elif func_name == "play_video": result = play_video(args.get("video_id", ""))
                                 elif func_name == "memorize_fact": result = memorize_fact(args.get("fact", ""))
-                                else: result = f"Error: The tool '{func_name}' does not exist or is not available."
+                                else:
+                                    mcp_tools = [t["function"]["name"] for t in mcp_client.get_tools_schema()]
+                                    if func_name in mcp_tools:
+                                        result = mcp_client.call_tool(func_name, args)
+                                    else:
+                                        result = f"Error: The tool '{func_name}' does not exist or is not available."
                             except Exception as e:
                                 result = f"Error executing tool '{func_name}': {str(e)}"
                                 print(f"Tool Error: {result}")
@@ -634,14 +757,7 @@ def audio_loop():
                                 
                                 if cmd_text.strip() and not is_hallucination(cmd_text):
                                     socketio.emit('transcript', {'text': f"You: {cmd_text}"})
-                                    lower_cmd = cmd_text.lower()
-                                    if "play" in lower_cmd and ("music" in lower_cmd or "youtube" in lower_cmd or "song" in lower_cmd):
-                                        socketio.emit('play_media', {'url': 'jfKfPfyJRdk'}) 
-                                        tts_generation_queue.put("प्लेइंग म्यूजिक बॉस।")
-                                        socketio.emit('transcript', {'text': "Charlie: Playing your stream now, Boss."})
-                                        IN_CONVERSATION = False
-                                    else:
-                                        threading.Thread(target=process_with_llm, args=(cmd_text,), daemon=True).start()
+                                    threading.Thread(target=process_with_llm, args=(cmd_text,), daemon=True).start()
                                 else:
                                     pass 
                                     
